@@ -7,6 +7,10 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authroute.js";
 import vehicleRoutes from "./routes/vehicleroute.js";
 import driverRoutes from "./routes/driverroute.js";
+import tripRoutes from "./routes/triproute.js";
+import maintenanceRoutes from "./routes/maintananceroute.js";
+import dashboardRoutes from "./routes/dashboardroute.js";
+
 
 dotenv.config();
 
@@ -24,6 +28,9 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/vehicles", vehicleRoutes);
 app.use("/api/drivers", driverRoutes);
+app.use("/api/trips", tripRoutes);
+app.use("/api/maintanance", maintenanceRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 
 const PORT = process.env.PORT || 5000;
