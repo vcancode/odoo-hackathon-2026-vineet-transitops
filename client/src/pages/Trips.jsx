@@ -4,7 +4,12 @@ import { IoNavigateOutline, IoAddOutline, IoTrashOutline, IoCheckmarkCircleOutli
 import API from "../services/api";
 import Table from "../components/Table";
 import Modal from "../components/Modal";
-import Spinner from "../components/Spinner";
+import SkeletonLoader from "../components/SkeletonLoader";
+import StatusBadge from "../components/StatusBadge";
+import FilterBar from "../components/FilterBar";
+import ConfirmDialog from "../components/ConfirmDialog";
+import { exportToCSV } from "../utils/csvExport";
+import { canCurrentUser } from "../utils/rolePermissions";
 
 const Trips = () => {
   const [trips, setTrips] = useState([]);
@@ -27,9 +32,8 @@ const Trips = () => {
   const [cargoWeight, setCargoWeight] = useState("");
   const [plannedDistance, setPlannedDistance] = useState("");
 
-  // Get user role for RBAC
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const isDispatcher = user.role === "Dispatcher";
+  // Filter state
+  const [activeFilter, setActiveFilter] = useState("All");
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -55,7 +59,6 @@ const Trips = () => {
     fetchData();
   }, []);
 
-  // Filter lists to only show "Available" status vehicles & drivers
   const availableVehicles = vehicles.filter((v) => v.status === "Available");
   const availableDrivers = drivers.filter(
     (d) => d.status === "Available" && new Date(d.licenseExpiry) > new Date()
@@ -83,7 +86,6 @@ const Trips = () => {
       return toast.error("Please fill all required fields");
     }
 
-    // Capacity client check
     const vehicleObj = vehicles.find((v) => v._id === selectedVehicle);
     if (vehicleObj && Number(cargoWeight) > vehicleObj.capacity) {
       return toast.error(`Cargo weight exceeds vehicle capacity of ${vehicleObj.capacity} kg`);
@@ -146,11 +148,40 @@ const Trips = () => {
     }
   };
 
+  // CSV Config
+  const csvColumns = [
+    {
+      header: "Vehicle Registration",
+      key: "vehicle",
+      csvAccessor: (row) => row.vehicle?.registrationNumber || "",
+    },
+    {
+      header: "Driver Name",
+      key: "driver",
+      csvAccessor: (row) => row.driver?.name || "",
+    },
+    { header: "Source", key: "source" },
+    { header: "Destination", key: "destination" },
+    { header: "Cargo Weight (kg)", key: "cargoWeight" },
+    { header: "Planned Distance (km)", key: "plannedDistance" },
+    { header: "Status", key: "status" },
+    {
+      header: "Dispatch Time",
+      key: "dispatchTime",
+      csvAccessor: (row) => row.dispatchTime ? new Date(row.dispatchTime).toLocaleString() : "",
+    },
+  ];
+
+  const handleExportCSV = () => {
+    exportToCSV(filteredTrips, csvColumns, "trips");
+  };
+
   // Define Table columns
   const columns = [
     {
       header: "Vehicle",
       key: "vehicle",
+      sortAccessor: (row) => row.vehicle?.registrationNumber,
       render: (row) => (
         <div>
           <div className="font-bold text-slate-100">
@@ -163,6 +194,7 @@ const Trips = () => {
     {
       header: "Driver",
       key: "driver",
+      sortAccessor: (row) => row.driver?.name,
       render: (row) => (
         <div>
           <div className="text-slate-100 font-semibold">{row.driver?.name || "N/A"}</div>
@@ -173,9 +205,10 @@ const Trips = () => {
     {
       header: "Route",
       key: "route",
+      sortAccessor: (row) => `${row.source} ${row.destination}`,
       render: (row) => (
         <div>
-          <div className="text-slate-200">
+          <div className="text-slate-250 font-medium">
             {row.source} → {row.destination}
           </div>
           <div className="text-[10px] text-slate-500">{row.plannedDistance} km</div>
@@ -190,21 +223,7 @@ const Trips = () => {
     {
       header: "Status",
       key: "status",
-      render: (row) => {
-        const colors = {
-          Dispatched: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-          Completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-        };
-        return (
-          <span
-            className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${
-              colors[row.status] || colors.Dispatched
-            }`}
-          >
-            {row.status}
-          </span>
-        );
-      },
+      render: (row) => <StatusBadge status={row.status} />,
     },
     {
       header: "Dispatch Time",
@@ -212,14 +231,14 @@ const Trips = () => {
       render: (row) =>
         row.dispatchTime ? new Date(row.dispatchTime).toLocaleString() : "-",
     },
-    ...(isDispatcher
+    ...(canCurrentUser("trips", "complete") || canCurrentUser("trips", "delete")
       ? [
           {
             header: "Actions",
             key: "actions",
             render: (row) => (
               <div className="flex items-center gap-2">
-                {row.status === "Dispatched" && (
+                {row.status === "Dispatched" && canCurrentUser("trips", "complete") && (
                   <button
                     onClick={() => handleCompleteTrip(row._id)}
                     className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/20 hover:bg-emerald-500/5 transition-all cursor-pointer"
@@ -228,13 +247,15 @@ const Trips = () => {
                     <IoCheckmarkCircleOutline className="text-base" />
                   </button>
                 )}
-                <button
-                  onClick={() => openDeleteModal(row)}
-                  className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
-                  title="Delete Trip"
-                >
-                  <IoTrashOutline className="text-base" />
-                </button>
+                {canCurrentUser("trips", "delete") && (
+                  <button
+                    onClick={() => openDeleteModal(row)}
+                    className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
+                    title="Delete Trip"
+                  >
+                    <IoTrashOutline className="text-base" />
+                  </button>
+                )}
               </div>
             ),
           },
@@ -242,10 +263,22 @@ const Trips = () => {
       : []),
   ];
 
+  // Frontend Filter
+  const filteredTrips = trips.filter((t) => {
+    if (activeFilter === "All") return true;
+    return t.status === activeFilter;
+  });
+
+  const filterTabs = [
+    { label: "All", value: "All", count: trips.length },
+    { label: "Completed", value: "Completed", count: trips.filter(t => t.status === "Completed").length },
+    { label: "Dispatched", value: "Dispatched", count: trips.filter(t => t.status === "Dispatched").length },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-fade-in-up">
         <div>
           <h2 className="text-2xl lg:text-3xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
             <IoNavigateOutline className="text-indigo-500" />
@@ -257,19 +290,28 @@ const Trips = () => {
 
       {/* Main Table view */}
       {isLoading ? (
-        <div className="flex h-[40vh] items-center justify-center">
-          <Spinner size="lg" />
-        </div>
+        <SkeletonLoader type="table" columns={7} rows={5} />
       ) : (
         <Table
           columns={columns}
-          data={trips}
-          searchPlaceholder="Search trips by route, vehicle, driver or status..."
+          data={filteredTrips}
+          searchPlaceholder="Search trips..."
+          emptyIcon="📦"
+          emptyTitle="No Trips Dispatched"
+          emptyMessage={activeFilter === "All" ? "No active or completed trips found. Dispatched a trip to start tracking." : `No trips found with status "${activeFilter}"`}
+          onExportCSV={handleExportCSV}
+          filterBar={
+            <FilterBar
+              filters={filterTabs}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+            />
+          }
           actions={
-            isDispatcher && (
+            canCurrentUser("trips", "add") && (
               <button
                 onClick={openAddModal}
-                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-750 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 hover:shadow-indigo-500/25 cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-550 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 cursor-pointer"
               >
                 <IoAddOutline className="text-lg" />
                 Dispatch Trip
@@ -400,37 +442,15 @@ const Trips = () => {
         </form>
       </Modal>
 
-      {/* Confirmation Delete Modal */}
-      <Modal
+      {/* Confirmation Delete modal */}
+      <ConfirmDialog
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
-        title="Confirm Trip Deletion"
-      >
-        <div className="space-y-4">
-          <p className="text-slate-300 text-sm leading-relaxed">
-            Are you sure you want to permanently delete the trip record from{" "}
-            <span className="font-bold text-slate-105">{tripToDelete?.source}</span> to{" "}
-            <span className="font-bold text-slate-105">{tripToDelete?.destination}</span>?
-            This will remove the log history.
-          </p>
-          <div className="flex justify-end gap-3 border-t border-slate-850 pt-4 mt-6">
-            <button
-              type="button"
-              onClick={() => setIsDeleteOpen(false)}
-              className="px-4 py-2 border border-slate-800 bg-slate-900 text-slate-350 hover:bg-slate-800 hover:text-slate-200 rounded-lg text-sm transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteSubmit}
-              className="px-4 py-2 bg-red-650 hover:bg-red-550 text-white rounded-lg text-sm font-semibold transition-colors cursor-pointer"
-            >
-              Yes, Delete Trip
-            </button>
-          </div>
-        </div>
-      </Modal>
+        onConfirm={handleDeleteSubmit}
+        title="Delete Trip?"
+        message={`Are you sure you want to permanently delete the trip record from "${tripToDelete?.source}" to "${tripToDelete?.destination}"? This will archive all logs.`}
+        confirmLabel="Yes, Delete Trip"
+      />
     </div>
   );
 };

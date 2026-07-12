@@ -4,7 +4,12 @@ import { IoBuildOutline, IoAddOutline, IoTrashOutline, IoCheckmarkCircleOutline 
 import API from "../services/api";
 import Table from "../components/Table";
 import Modal from "../components/Modal";
-import Spinner from "../components/Spinner";
+import SkeletonLoader from "../components/SkeletonLoader";
+import StatusBadge from "../components/StatusBadge";
+import FilterBar from "../components/FilterBar";
+import ConfirmDialog from "../components/ConfirmDialog";
+import { exportToCSV } from "../utils/csvExport";
+import { canCurrentUser } from "../utils/rolePermissions";
 
 const Maintenance = () => {
   const [maintenances, setMaintenances] = useState([]);
@@ -24,9 +29,8 @@ const Maintenance = () => {
   const [description, setDescription] = useState("");
   const [cost, setCost] = useState("");
 
-  // Get current logged-in user to verify FleetManager role
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const isFleetManager = user.role === "FleetManager";
+  // Filter state
+  const [activeFilter, setActiveFilter] = useState("All");
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -55,7 +59,6 @@ const Maintenance = () => {
     fetchData();
   }, []);
 
-  // Filter available vehicles to log maintenance
   const availableVehicles = vehicles.filter((v) => v.status === "Available");
 
   const openAddModal = () => {
@@ -133,11 +136,34 @@ const Maintenance = () => {
     }
   };
 
+  // CSV Config
+  const csvColumns = [
+    {
+      header: "Vehicle Registration",
+      key: "vehicle",
+      csvAccessor: (row) => row.vehicle?.registrationNumber || "",
+    },
+    { header: "Issue Category", key: "issue" },
+    { header: "Description", key: "description" },
+    { header: "Cost (INR)", key: "cost" },
+    { header: "Status", key: "status" },
+    {
+      header: "Logged Date",
+      key: "createdAt",
+      csvAccessor: (row) => row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "",
+    },
+  ];
+
+  const handleExportCSV = () => {
+    exportToCSV(filteredMaintenance, csvColumns, "maintenance");
+  };
+
   // Define Table columns
   const columns = [
     {
       header: "Vehicle",
       key: "vehicle",
+      sortAccessor: (row) => row.vehicle?.registrationNumber,
       render: (row) => (
         <div>
           <div className="font-bold text-slate-100">
@@ -165,35 +191,21 @@ const Maintenance = () => {
     {
       header: "Status",
       key: "status",
-      render: (row) => {
-        const colors = {
-          Pending: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-          Completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-        };
-        return (
-          <span
-            className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${
-              colors[row.status] || colors.Pending
-            }`}
-          >
-            {row.status}
-          </span>
-        );
-      },
+      render: (row) => <StatusBadge status={row.status} />,
     },
     {
       header: "Logged Date",
       key: "createdAt",
       render: (row) => new Date(row.createdAt).toLocaleDateString(),
     },
-    ...(isFleetManager
+    ...(canCurrentUser("maintenance", "complete") || canCurrentUser("maintenance", "delete")
       ? [
           {
             header: "Actions",
             key: "actions",
             render: (row) => (
               <div className="flex items-center gap-2">
-                {row.status === "Pending" && (
+                {row.status === "Pending" && canCurrentUser("maintenance", "complete") && (
                   <button
                     onClick={() => handleCompleteMaintenance(row._id)}
                     className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/20 hover:bg-emerald-500/5 transition-all cursor-pointer"
@@ -202,13 +214,15 @@ const Maintenance = () => {
                     <IoCheckmarkCircleOutline className="text-base" />
                   </button>
                 )}
-                <button
-                  onClick={() => openDeleteModal(row)}
-                  className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
-                  title="Delete Record"
-                >
-                  <IoTrashOutline className="text-base" />
-                </button>
+                {canCurrentUser("maintenance", "delete") && (
+                  <button
+                    onClick={() => openDeleteModal(row)}
+                    className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
+                    title="Delete Record"
+                  >
+                    <IoTrashOutline className="text-base" />
+                  </button>
+                )}
               </div>
             ),
           },
@@ -216,13 +230,25 @@ const Maintenance = () => {
       : []),
   ];
 
+  // Frontend Filter
+  const filteredMaintenance = maintenances.filter((m) => {
+    if (activeFilter === "All") return true;
+    return m.status === activeFilter;
+  });
+
+  const filterTabs = [
+    { label: "All", value: "All", count: maintenances.length },
+    { label: "Pending", value: "Pending", count: maintenances.filter(m => m.status === "Pending").length },
+    { label: "Completed", value: "Completed", count: maintenances.filter(m => m.status === "Completed").length },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-fade-in-up">
         <div>
           <h2 className="text-2xl lg:text-3xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
-            <IoBuildOutline className="text-amber-500" />
+            <IoBuildOutline className="text-amber-555" />
             Maintenance
           </h2>
           <p className="text-sm text-slate-400 mt-1">
@@ -233,19 +259,28 @@ const Maintenance = () => {
 
       {/* Main Table view */}
       {isLoading ? (
-        <div className="flex h-[40vh] items-center justify-center">
-          <Spinner size="lg" />
-        </div>
+        <SkeletonLoader type="table" columns={6} rows={5} />
       ) : (
         <Table
           columns={columns}
-          data={maintenances}
-          searchPlaceholder="Search maintenance entries by vehicle registration, issue or description..."
+          data={filteredMaintenance}
+          searchPlaceholder="Search maintenance..."
+          emptyIcon="🛠"
+          emptyTitle="No Maintenance Logs"
+          emptyMessage={activeFilter === "All" ? "Click Create Maintenance to log your first service record" : `No maintenance logs found with status "${activeFilter}"`}
+          onExportCSV={handleExportCSV}
+          filterBar={
+            <FilterBar
+              filters={filterTabs}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+            />
+          }
           actions={
-            isFleetManager && (
+            canCurrentUser("maintenance", "add") && (
               <button
                 onClick={openAddModal}
-                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-750 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 hover:shadow-indigo-500/25 cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-550 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 cursor-pointer"
               >
                 <IoAddOutline className="text-lg" />
                 Create Maintenance
@@ -342,38 +377,15 @@ const Maintenance = () => {
         </form>
       </Modal>
 
-      {/* Confirmation Delete Modal */}
-      <Modal
+      {/* Confirmation Delete modal */}
+      <ConfirmDialog
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
-        title="Confirm Maintenance Delete"
-      >
-        <div className="space-y-4">
-          <p className="text-slate-300 text-sm leading-relaxed">
-            Are you sure you want to permanently delete the maintenance log for{" "}
-            <span className="font-bold text-slate-105">
-              {maintenanceToDelete?.vehicle?.registrationNumber || "this vehicle"}
-            </span>{" "}
-            ({maintenanceToDelete?.issue})? This action cannot be undone.
-          </p>
-          <div className="flex justify-end gap-3 border-t border-slate-850 pt-4 mt-6">
-            <button
-              type="button"
-              onClick={() => setIsDeleteOpen(false)}
-              className="px-4 py-2 border border-slate-800 bg-slate-900 text-slate-350 hover:bg-slate-800 hover:text-slate-200 rounded-lg text-sm transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteSubmit}
-              className="px-4 py-2 bg-red-650 hover:bg-red-550 text-white rounded-lg text-sm font-semibold transition-colors cursor-pointer"
-            >
-              Yes, Delete Record
-            </button>
-          </div>
-        </div>
-      </Modal>
+        onConfirm={handleDeleteSubmit}
+        title="Delete Maintenance Log?"
+        message={`Are you sure you want to permanently delete the maintenance log for "${maintenanceToDelete?.vehicle?.registrationNumber || 'this vehicle'}" (${maintenanceToDelete?.issue})? This action cannot be undone.`}
+        confirmLabel="Yes, Delete Record"
+      />
     </div>
   );
 };

@@ -4,7 +4,12 @@ import { IoCarOutline, IoAddOutline, IoTrashOutline, IoCreateOutline } from "rea
 import API from "../services/api";
 import Table from "../components/Table";
 import Modal from "../components/Modal";
-import Spinner from "../components/Spinner";
+import SkeletonLoader from "../components/SkeletonLoader";
+import StatusBadge from "../components/StatusBadge";
+import FilterBar from "../components/FilterBar";
+import ConfirmDialog from "../components/ConfirmDialog";
+import { exportToCSV } from "../utils/csvExport";
+import { canCurrentUser } from "../utils/rolePermissions";
 
 const Vehicles = () => {
   const [vehicles, setVehicles] = useState([]);
@@ -27,9 +32,8 @@ const Vehicles = () => {
   const [acquisitionCost, setAcquisitionCost] = useState("");
   const [status, setStatus] = useState("Available");
 
-  // Get current logged-in user to verify FleetManager role
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const isFleetManager = user.role === "FleetManager";
+  // Filter state
+  const [activeFilter, setActiveFilter] = useState("All");
 
   const fetchVehicles = async () => {
     setIsLoading(true);
@@ -99,7 +103,6 @@ const Vehicles = () => {
     const loadToast = toast.loading(currentVehicle ? "Updating vehicle..." : "Adding vehicle...");
     try {
       if (currentVehicle) {
-        // Update
         const res = await API.put(`/vehicles/${currentVehicle._id}`, payload);
         if (res.data.success) {
           toast.success("Vehicle updated successfully", { id: loadToast });
@@ -107,7 +110,6 @@ const Vehicles = () => {
           setIsFormOpen(false);
         }
       } else {
-        // Create
         const res = await API.post("/vehicles", payload);
         if (res.data.success) {
           toast.success("Vehicle added successfully", { id: loadToast });
@@ -140,6 +142,21 @@ const Vehicles = () => {
     }
   };
 
+  // CSV columns config
+  const csvColumns = [
+    { header: "Registration Number", key: "registrationNumber" },
+    { header: "Model", key: "model" },
+    { header: "Type", key: "type" },
+    { header: "Capacity (kg)", key: "capacity" },
+    { header: "Odometer (km)", key: "odometer" },
+    { header: "Acquisition Cost (INR)", key: "acquisitionCost" },
+    { header: "Status", key: "status" },
+  ];
+
+  const handleExportCSV = () => {
+    exportToCSV(filteredVehicles, csvColumns, "vehicles");
+  };
+
   // Define Table columns
   const columns = [
     {
@@ -167,45 +184,33 @@ const Vehicles = () => {
     {
       header: "Status",
       key: "status",
-      render: (row) => {
-        const colors = {
-          Available: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-          "On Trip": "bg-blue-500/10 text-blue-400 border-blue-500/20",
-          "In Shop": "bg-amber-500/10 text-amber-400 border-amber-500/20",
-          Retired: "bg-slate-500/10 text-slate-400 border-slate-500/20",
-        };
-        return (
-          <span
-            className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${
-              colors[row.status] || colors.Available
-            }`}
-          >
-            {row.status}
-          </span>
-        );
-      },
+      render: (row) => <StatusBadge status={row.status} />,
     },
-    ...(isFleetManager
+    ...(canCurrentUser("vehicles", "edit") || canCurrentUser("vehicles", "delete")
       ? [
           {
             header: "Actions",
             key: "actions",
             render: (row) => (
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => openEditModal(row)}
-                  className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-indigo-400 hover:border-indigo-500/20 hover:bg-indigo-500/5 transition-all cursor-pointer"
-                  title="Edit Vehicle"
-                >
-                  <IoCreateOutline className="text-base" />
-                </button>
-                <button
-                  onClick={() => openDeleteModal(row)}
-                  className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
-                  title="Delete Vehicle"
-                >
-                  <IoTrashOutline className="text-base" />
-                </button>
+                {canCurrentUser("vehicles", "edit") && (
+                  <button
+                    onClick={() => openEditModal(row)}
+                    className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-indigo-400 hover:border-indigo-500/20 hover:bg-indigo-500/5 transition-all cursor-pointer"
+                    title="Edit Vehicle"
+                  >
+                    <IoCreateOutline className="text-base" />
+                  </button>
+                )}
+                {canCurrentUser("vehicles", "delete") && (
+                  <button
+                    onClick={() => openDeleteModal(row)}
+                    className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
+                    title="Delete Vehicle"
+                  >
+                    <IoTrashOutline className="text-base" />
+                  </button>
+                )}
               </div>
             ),
           },
@@ -213,10 +218,23 @@ const Vehicles = () => {
       : []),
   ];
 
+  // Frontend Filter
+  const filteredVehicles = vehicles.filter((v) => {
+    if (activeFilter === "All") return true;
+    return v.status === activeFilter;
+  });
+
+  const filterTabs = [
+    { label: "All", value: "All", count: vehicles.length },
+    { label: "Available", value: "Available", count: vehicles.filter(v => v.status === "Available").length },
+    { label: "On Trip", value: "On Trip", count: vehicles.filter(v => v.status === "On Trip").length },
+    { label: "In Shop", value: "In Shop", count: vehicles.filter(v => v.status === "In Shop").length },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-fade-in-up">
         <div>
           <h2 className="text-2xl lg:text-3xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
             <IoCarOutline className="text-indigo-500" />
@@ -228,19 +246,28 @@ const Vehicles = () => {
 
       {/* Main Table view */}
       {isLoading ? (
-        <div className="flex h-[40vh] items-center justify-center">
-          <Spinner size="lg" />
-        </div>
+        <SkeletonLoader type="table" columns={7} rows={5} />
       ) : (
         <Table
           columns={columns}
-          data={vehicles}
-          searchPlaceholder="Search vehicles by registration, model or type..."
+          data={filteredVehicles}
+          searchPlaceholder="Search vehicles..."
+          emptyIcon="🚚"
+          emptyTitle="No Vehicles Found"
+          emptyMessage={activeFilter === "All" ? "Click Add Vehicle to create your first vehicle record" : `No vehicles found with status "${activeFilter}"`}
+          onExportCSV={handleExportCSV}
+          filterBar={
+            <FilterBar
+              filters={filterTabs}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+            />
+          }
           actions={
-            isFleetManager && (
+            canCurrentUser("vehicles", "add") && (
               <button
                 onClick={openAddModal}
-                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-750 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 hover:shadow-indigo-500/25 cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-505 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 cursor-pointer"
               >
                 <IoAddOutline className="text-lg" />
                 Add Vehicle
@@ -267,7 +294,7 @@ const Vehicles = () => {
                 placeholder="e.g. OD07AB4521"
                 value={registrationNumber}
                 onChange={(e) => setRegistrationNumber(e.target.value)}
-                disabled={currentVehicle !== null} // Lock registration edit if editing
+                disabled={currentVehicle !== null}
                 className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-650 focus:outline-none focus:border-indigo-500 text-sm disabled:opacity-50"
               />
             </div>
@@ -377,38 +404,15 @@ const Vehicles = () => {
         </form>
       </Modal>
 
-      {/* Confirmation Delete Modal */}
-      <Modal
+      {/* Confirmation Delete modal */}
+      <ConfirmDialog
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
-        title="Confirm Vehicle Deletion"
-      >
-        <div className="space-y-4">
-          <p className="text-slate-300 text-sm leading-relaxed">
-            Are you sure you want to permanently delete the vehicle{" "}
-            <span className="font-bold text-slate-100">
-              {vehicleToDelete?.registrationNumber}
-            </span>{" "}
-            ({vehicleToDelete?.model}) from the ERP system? This action is irreversible.
-          </p>
-          <div className="flex justify-end gap-3 border-t border-slate-850 pt-4 mt-6">
-            <button
-              type="button"
-              onClick={() => setIsDeleteOpen(false)}
-              className="px-4 py-2 border border-slate-800 bg-slate-900 text-slate-350 hover:bg-slate-800 hover:text-slate-200 rounded-lg text-sm transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteSubmit}
-              className="px-4 py-2 bg-red-650 hover:bg-red-550 text-white rounded-lg text-sm font-semibold transition-colors cursor-pointer"
-            >
-              Yes, Delete Vehicle
-            </button>
-          </div>
-        </div>
-      </Modal>
+        onConfirm={handleDeleteSubmit}
+        title="Delete Vehicle?"
+        message={`Are you sure you want to permanently delete the vehicle "${vehicleToDelete?.registrationNumber}" (${vehicleToDelete?.model})? This action is irreversible.`}
+        confirmLabel="Yes, Delete Vehicle"
+      />
     </div>
   );
 };
