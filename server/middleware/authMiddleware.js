@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 
-export const protect = (req, res, next) => {
+const protect = (req, res, next) => {
     try {
 
         let token = req.headers.authorization;
@@ -29,3 +29,5 @@ export const protect = (req, res, next) => {
 
     }
 };
+
+export default protect
