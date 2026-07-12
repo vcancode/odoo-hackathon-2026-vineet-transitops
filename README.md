@@ -215,21 +215,7 @@ TransitOps/
 |---|---|---|
 | GET | `/api/dashboard` | Get fleet KPIs and statistics |
 
----
 
-## 📸 Screenshots
-
-| Login | Dashboard |
-|---|---|
-| _Add screenshot_ | _Add screenshot_ |
-
-| Vehicles | Drivers |
-|---|---|
-| _Add screenshot_ | _Add screenshot_ |
-
-| Trips | Maintenance |
-|---|---|
-| _Add screenshot_ | _Add screenshot_ |
 
 ---
 
